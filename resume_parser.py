@@ -1067,6 +1067,7 @@ SECTION_HEADERS = {
     "education":      {
         "education", "academic background", "qualifications",
         "degrees", "academic qualifications",
+        "educational qualification", "educational qualifications",
     },
     "skills":         {
         "skills", "technical skills", "core competencies", "technologies",
@@ -1333,7 +1334,7 @@ def extract_skills_from_text(text: str) -> list:
                         skills.append(bigram)
     # Filter noise before capping
     skills = [s for s in skills if not NOISE.match(s) and len(s) >= 2]
-    return skills[:400]  # cap at 200 — more than enough
+    return skills[:600]  # cap at 200 — more than enough
 
 
 # ── Section splitter ──────────────────────────────────────────────────────────

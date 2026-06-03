@@ -3932,7 +3932,8 @@ def retrieve_top_n(
     print("ALL SKILLS:", jd_features["all_skills"])  # ← ADD
     for c in index.candidates:
         if "shubham" in c.get("name", "").lower():
-            print("NAME:", c.get("name"), "| database:", [s for s in c.get("skills", []) if "database" in s or "integration" in s])
+            print("NAME:", c.get("name"), "| scikit:", [s for s in c.get("skills", []) if "scikit" in s])
+            print("Total skills:", len(c.get("skills", [])))
     jd_tokens = tokenize(jd_text)
 
     # ── Retrieval (no new LLM call) ───────────────────────────────────────────
