@@ -3640,6 +3640,18 @@ def fuzzy_match(jd_skill: str, cand_set: set, skill_synonyms: dict = None) -> bo
                 if syn_words.issubset(cs_words) and len(syn_words) >= 2:
                     return True
 
+    # Hyphen normalization: "scikit-learn" == "scikit learn"
+    jd_nohyphen = jd_skill.replace("-", " ")
+    for cs in cand_set:
+        cs_nohyphen = cs.replace("-", " ")
+        if jd_nohyphen == cs_nohyphen:
+            return True
+    # Version suffix normalization: "css" matches "css3", "html" matches "html5"
+    for cs in cand_set:
+        cs_base = cs.rstrip("0123456789")
+        jd_base = jd_skill.rstrip("0123456789")
+        if cs_base == jd_base:
+            return True
     return False
 
 
@@ -3674,7 +3686,7 @@ def skill_overlap_score(candidate_skills: list, jd_features: dict) -> float:
     all_jd = set(jd_features.get("all_skills", []))
     if not all_jd:
         return 0.0
-    cand_set   = set(candidate_skills)
+    cand_set   = set(s.lower() for s in candidate_skills)  # ← yeh badla
     req        = set(jd_features.get("required_skills",  []))
     pref       = set(jd_features.get("preferred_skills", []))
     syns       = jd_features.get("skill_synonyms", {})
@@ -3682,7 +3694,6 @@ def skill_overlap_score(candidate_skills: list, jd_features: dict) -> float:
     pref_match = sum(fuzzy_match(s, cand_set, syns) for s in pref)   / len(pref)   if pref  else 0.0
     all_match  = sum(fuzzy_match(s, cand_set, syns) for s in all_jd) / len(all_jd)
     return 0.5 * req_match + 0.3 * all_match + 0.2 * pref_match
-
 
 def experience_score(candidate_years: float, required_years: float) -> float:
     if required_years <= 0:
@@ -3696,7 +3707,7 @@ def experience_score(candidate_years: float, required_years: float) -> float:
 
 
 def build_explanation_data(candidate: dict, jd_features: dict, final_score: float) -> dict:
-    cand_set  = set(candidate.get("skills", []))
+    cand_set = set(s.lower() for s in candidate.get("skills", []))
     jd_skills = set(jd_features.get("all_skills", []))
     req       = set(jd_features.get("required_skills", []))
 
@@ -3761,12 +3772,17 @@ def rerank_and_explain(
         exp     = c.get("experience_years", 0)
         name    = c.get("name", f"Candidate {i}")
         ex      = item["explanation"]
-        matched = ", ".join(ex.get("matched_skills", [])[:15]) or "none"
+        cand_skills_lower = set(s.lower() for s in c.get("skills", []))
+        jd_all = set(jd_features.get("all_skills", []))
+        syns = jd_features.get("skill_synonyms", {})
+        matched_now = [s for s in jd_all if fuzzy_match(s, cand_skills_lower, syns)]
+        matched = ", ".join(matched_now[:15]) or "none"
         chunks  = c.get("chunks", {})
         context = (
+            chunks.get("skills", "") + " " +
             chunks.get("summary", "") + " " +
             chunks.get("experience", "")[:500]
-        )[:600]
+        )[:900]
         dr_pct  = round(item.get("domain_relevance", 1.0) * 100)
         summaries.append(
             f"[{i}] {name} | {exp} yrs exp | domain_match={dr_pct}%\n"
@@ -3798,7 +3814,7 @@ def rerank_and_explain(
              "   even if they share some general skills like 'python' or 'excel'.\n"
              "3. Generic skills (excel, python, communication) shared across domains\n"
              "   do NOT make someone relevant to this role. Core domain skills do.\n"
-             "4. ALREADY_MATCHED skills are confirmed present — never list in gaps.\n"
+             "4. ALREADY_MATCHED skills are 100% confirmed present in resume — STRICTLY NEVER mention them in gaps. This is a hard rule.\n"
              "5. Infer soft skills from experience context, don't hallucinate them.\n"
              "6. Penalize keyword stuffing or inconsistent domain profiles.\n"
              "7. Only mention strengths explicitly supported by candidate context.\n\n"
@@ -3855,6 +3871,25 @@ def rerank_and_explain(
             item["explanation"]["gaps"]       = res.get("gaps",      [])[:3]
             item["is_relevant"] = is_relevant and llm_s >= LLM_RELEVANCE_GATE
 
+            # ── Recompute matched/missing so they are consistent ──────────────
+            c         = item["candidate"]
+            cand_set  = set(s.lower() for s in c.get("skills", []))
+            jd_skills = set(jd_features.get("all_skills", []))
+            req       = set(jd_features.get("required_skills", []))
+            syns      = jd_features.get("skill_synonyms", {})
+
+            matched  = sorted(s for s in jd_skills if fuzzy_match(s, cand_set, syns))
+            missing  = sorted(s for s in jd_skills if not fuzzy_match(s, cand_set, syns))
+
+            # Extra safety: strip anything in matched from missing
+            matched_set = set(matched)
+            missing = [s for s in missing if s not in matched_set]
+
+            item["explanation"]["matched_skills"]   = matched
+            item["explanation"]["missing_skills"]   = missing[:8]
+            item["explanation"]["required_matched"] = sorted(s for s in req if fuzzy_match(s, cand_set, syns))
+            item["explanation"]["required_missing"] = sorted(s for s in req if not fuzzy_match(s, cand_set, syns))
+
     except Exception as exc:
         print(f"[retrieval_engine] Rerank+explain failed: {exc} — using pre-ranked scores")
         for item in domain_filtered:
@@ -3894,7 +3929,11 @@ def retrieve_top_n(
 
     # ── Call #1 ───────────────────────────────────────────────────────────────
     jd_features = extract_jd_features(jd_text, api_key)
-    jd_tokens   = tokenize(jd_text)
+    print("ALL SKILLS:", jd_features["all_skills"])  # ← ADD
+    for c in index.candidates:
+        if "shubham" in c.get("name", "").lower():
+            print("NAME:", c.get("name"), "| database:", [s for s in c.get("skills", []) if "database" in s or "integration" in s])
+    jd_tokens = tokenize(jd_text)
 
     # ── Retrieval (no new LLM call) ───────────────────────────────────────────
     POOL_SIZE  = max(top_n * 3, 30)

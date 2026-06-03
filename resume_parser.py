@@ -1052,7 +1052,11 @@ import pdfplumber
 import fitz  # PyMuPDF
 from pathlib import Path
 from docx import Document
-
+import re
+NOISE = re.compile(
+    r'^\d+$|^\d[\d\s]+\d$|^[a-z0-9._%+-]+@|^[a-z]+\d{4,}$'
+    r'|^\d{6,}\s[a-z]|^[a-z]{2,}\s\d{6,}$|^\+?\d[\d\s\-]{8,}\d$'
+)
 
 # ── Section headers (plain string match — no regex) ───────────────────────────
 SECTION_HEADERS = {
@@ -1327,8 +1331,9 @@ def extract_skills_from_text(text: str) -> list:
                     if not any(p in STOP_WORDS for p in parts):
                         seen.add(bigram)
                         skills.append(bigram)
-
-    return skills[:200]  # cap at 200 — more than enough
+    # Filter noise before capping
+    skills = [s for s in skills if not NOISE.match(s) and len(s) >= 2]
+    return skills[:400]  # cap at 200 — more than enough
 
 
 # ── Section splitter ──────────────────────────────────────────────────────────
