@@ -1174,13 +1174,23 @@ def extract_email(text: str) -> str:
 def extract_name(text: str) -> str:
     """First short line that looks like a person's name."""
     lines = [ln.strip() for ln in text.split("\n") if ln.strip()]
-    for line in lines[:6]:
-        if "@" in line or len(line) > 50:
+    for line in lines[:10]:
+        # Clean common prefixes
+        cleaned = line
+        for prefix in ["name -", "name:", "name- ", "candidate name:", "full name:"]:
+            if cleaned.lower().startswith(prefix):
+                cleaned = cleaned[len(prefix):].strip()
+                break
+        if "@" in cleaned or len(cleaned) > 50:
             continue
-        words = line.split()
+        # Skip section headers
+        if cleaned.lower() in {"profile summary", "professional summary", "summary",
+                                "objective", "career objective", "about me", "overview"}:
+            continue
+        words = cleaned.split()
         if 2 <= len(words) <= 5:
-            if all(ch.isalpha() or ch in " .-'" for ch in line):
-                return line
+            if all(ch.isalpha() or ch in " .-'" for ch in cleaned):
+                return cleaned
     return lines[0][:40] if lines else "Unknown"
 
 
@@ -1236,16 +1246,40 @@ import re
 def extract_experience_years(text: str, sections: dict = None) -> float:
     import datetime, re
     current_year = datetime.datetime.now().year
-    ranges = []
+
     if sections is None:
         sections = split_sections(text)
+
+    # Remove all non-work sections from text
     edu_text = sections.get("education", "")
-    work_text = text.replace(edu_text, " ") if edu_text.strip() else text
+    edu_ranges = set()
+    if edu_text.strip():
+        for m in re.finditer(
+            r'(\d{1,2})[/.](\d{4})\s*(?:-|–|—|to)\s*(?:(\d{1,2})[/.])?(\d{4}|present|current|now)',
+            edu_text, re.IGNORECASE
+        ):
+            s_yr = int(m.group(2))
+            end_raw = m.group(4).strip().lower()
+            e_yr = current_year if end_raw in ("present","current","now") else int(end_raw)
+            edu_ranges.add((s_yr, e_yr))
+        for m in re.finditer(r'((?:19|20)\d{2})\s*(?:-|–|—|to)\s*((?:19|20)\d{2}|present|current|now)', edu_text, re.IGNORECASE):
+            s_yr = int(m.group(1))
+            end_raw = m.group(2).strip().lower()
+            e_yr = current_year if end_raw in ("present","current","now") else int(end_raw)
+            edu_ranges.add((s_yr, e_yr))
+
+    work_text = text
+    # for k in ["education", "skills", "certifications", "languages", "interests", "achievements"]:
+    #     chunk = sections.get(k, "")
+    #     if chunk.strip():
+    #         work_text = work_text.replace(chunk, " ")
+
+    ranges = []
 
     year_pattern = re.compile(
         r'((?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*[\s,]*)?'
         r'((?:19|20)\d{2})'
-        r'\s*(?:-|–|—|to)\s*'
+        r'\s*(?:-|–|—|to|till)\s*'
         r'((?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*[\s,]*)?'
         r'((?:19|20)\d{2}|present|current|now|till date|date)',
         re.IGNORECASE
@@ -1255,12 +1289,54 @@ def extract_experience_years(text: str, sections: dict = None) -> float:
         s = int(match.group(2))
         end_raw = match.group(4).strip().lower()
         e = current_year if end_raw in ("present", "current", "now", "till date", "date") else int(end_raw)
-
         if not (1980 <= s <= current_year and s <= e <= current_year + 1):
+            continue
+        if (s, e) in edu_ranges:
+            continue
+        ranges.append((s, e))
+
+    # Month-Year format handler (e.g. "Feb 2024 — Oct 2025", "May 2021--- Dec 2023")
+    monthyear = re.compile(
+        r'(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*[\s,]*'
+        r'((?:19|20)\d{2})'
+        r'\s*(?:-{1,3}|–|—|to|till)\s*'
+        r'(?:(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*[\s,]*)?'
+        r'((?:19|20)\d{2}|present|current|now)',
+        re.IGNORECASE
+    )
+    for m in monthyear.finditer(work_text):
+        s = int(m.group(1))
+        end_raw = m.group(2).strip().lower()
+        e = current_year if end_raw in ("present", "current", "now") else int(end_raw)
+        if not (1980 <= s <= current_year and s <= e <= current_year + 1):
+            continue
+        if (s, e) in edu_ranges:
+            continue
+        ranges.append((s, e))
+
+    # MM/YYYY format handler
+    mmyyyy = re.compile(
+        r'(\d{1,2})[/.](\d{4})\s*(?:-|–|—|to)\s*(\d{1,2}[/.](\d{4})|present|current|now)',
+        re.IGNORECASE
+    )
+    for m in mmyyyy.finditer(work_text):
+        s = int(m.group(2))
+        end_raw = m.group(3).strip().lower()
+        if end_raw in ("present", "current", "now"):
+            e = current_year
+        else:
+            try:
+                e = int(m.group(4))
+            except:
+                continue
+        if not (1980 <= s <= current_year and s <= e <= current_year + 1):
+            continue
+        if (s, e) in edu_ranges:
             continue
         ranges.append((s, e))
 
     if ranges:
+        ranges = list(set(ranges))  # remove duplicates
         ranges.sort()
         merged = [list(ranges[0])]
         for start, end in ranges[1:]:
@@ -1340,6 +1416,7 @@ def extract_skills_from_text(text: str) -> list:
 # ── Section splitter ──────────────────────────────────────────────────────────
 
 def split_sections(text: str) -> dict:
+    import re
     lines    = text.split("\n")
     sections = {k: [] for k in ["full", "skills", "experience", "projects",
                                  "education", "certifications", "summary"]}
@@ -1357,7 +1434,36 @@ def split_sections(text: str) -> dict:
         else:
             sections[current].append(line)
 
-    return {k: "\n".join(v).strip() for k, v in sections.items()}
+    result = {k: "\n".join(v).strip() for k, v in sections.items()}
+
+    # Fallback for single-block PDFs where newlines are missing
+    if not result.get("education") or not result.get("experience"):
+        flat_headers = []
+        for section, headers in SECTION_HEADERS.items():
+            for h in headers:
+                flat_headers.append((h, section))
+
+        # Longest header first to avoid partial matches
+        flat_headers.sort(key=lambda x: -len(x[0]))
+
+        pattern = re.compile(
+            r'(?i)\b(' + '|'.join(re.escape(h) for h, _ in flat_headers) + r')\b'
+        )
+
+        matches = list(pattern.finditer(text))
+        for i, match in enumerate(matches):
+            matched_header = match.group().strip().lower()
+            section_name = next(
+                (sec for h, sec in flat_headers if h.lower() == matched_header),
+                None
+            )
+            if not section_name:
+                continue
+            start = match.end()
+            end   = matches[i + 1].start() if i + 1 < len(matches) else len(text)
+            result[section_name] = (result.get(section_name, "") + " " + text[start:end]).strip()
+
+    return result
 
 
 # ── Main pipeline (0 API calls) ───────────────────────────────────────────────

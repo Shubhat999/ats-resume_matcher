@@ -1892,6 +1892,7 @@ with st.sidebar:
         accept_multiple_files=True,
         label_visibility="collapsed",
         disabled=not api_ok,
+        key=st.session_state.get("uploader_key", "uploader_0"),
     )
 
     if uploaded_files and api_ok:
@@ -1950,6 +1951,10 @@ with st.sidebar:
             st.session_state.resume_index   = ResumeIndex()
             st.session_state.results        = []
             st.session_state.index_built    = False
+            # Uploader key change karo taaki files reset ho
+            cur = st.session_state.get("uploader_key", "uploader_0")
+            num = int(cur.split("_")[1]) + 1
+            st.session_state["uploader_key"] = f"uploader_{num}"
             st.rerun()
 
     st.markdown("""
@@ -2165,9 +2170,6 @@ if results:
             <div style="flex:1;min-width:200px;">
               <div class="sec-label">Why Selected</div>{str_html}{gap_html}
             </div>
-          </div>
-          <div style="margin-top:12px;">
-            <div class="sec-label">All Skill Tokens</div><div>{all_sk_html}</div>
           </div>
         </div>
         """

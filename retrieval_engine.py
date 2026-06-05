@@ -3409,6 +3409,7 @@ FIXES (v2):
   - Irrelevant candidates are filtered BEFORE returning results
 """
 
+import hashlib
 import numpy as np
 from typing import Optional
 from rank_bm25 import BM25Okapi
@@ -3591,6 +3592,341 @@ def bm25_top_k(index: ResumeIndex, jd_tokens: list, k: int) -> list:
     ranked = np.argsort(-scores)
     return [int(i) for i in ranked[:k]]
 
+SKILL_ALIASES = {
+    # ── SQL / Databases ───────────────────────────────────────────────────────
+    "sql":                    ["mysql", "postgresql", "postgres", "mssql", "sql server",
+                               "oracle sql", "pl/sql", "sql queries", "sql plus", "t-sql",
+                               "database queries", "rdbms", "relational database", "bigquery",
+                               "redshift", "snowflake", "sqlite", "mariadb", "db2",
+                               "sql scripting", "stored procedures", "sql optimization"],
+    "nosql":                  ["mongodb", "cassandra", "dynamodb", "couchdb", "redis",
+                               "elasticsearch", "firebase", "hbase", "neo4j", "couchbase"],
+    "mysql":                  ["sql", "relational database", "rdbms", "mysql workbench"],
+    "postgresql":             ["postgres", "sql", "rdbms", "pg", "pgadmin"],
+    "mongodb":                ["nosql", "document database", "mongo"],
+    "redis":                  ["in-memory database", "caching", "redis cache", "memcached"],
+    "elasticsearch":          ["elastic search", "elk stack", "opensearch", "kibana"],
+
+    # ── Programming Languages ─────────────────────────────────────────────────
+    "python":                 ["python 3", "python3", "python 2", "py", "python scripting",
+                               "python programming", "python development"],
+    "java":                   ["core java", "java 8", "java 8+", "java 11", "java 17",
+                               "java ee", "java se", "j2ee", "jvm", "java programming",
+                               "java development", "object oriented java", "javascript"],
+    "javascript":             ["js", "es6", "es6+", "es2015", "es2020", "vanilla js",
+                               "node.js", "nodejs", "node js", "typescript", "ts", "jquery",
+                               "javascript programming"],
+    "typescript":             ["ts", "javascript", "js", "typed javascript"],
+    "c#":                     ["csharp", "c sharp", ".net", "dotnet", "asp.net", "net core"],
+    "c++":                    ["cpp", "c plus plus", "c/c++"],
+    "r":                      ["r programming", "r language", "r studio", "rstudio"],
+    "scala":                  ["apache scala", "scala programming"],
+    "go":                     ["golang", "go programming", "go lang"],
+    "ruby":                   ["ruby on rails", "rails", "ror"],
+    "php":                    ["laravel", "symfony", "codeigniter", "php programming"],
+    "swift":                  ["ios development", "xcode", "ios programming"],
+    "kotlin":                 ["android development", "android programming"],
+    "rust":                   ["rust programming", "rust lang"],
+    "perl":                   ["perl scripting"],
+    "shell":                  ["bash", "shell scripting", "bash scripting", "unix shell",
+                               "linux scripting", "powershell"],
+
+    # ── Backend Frameworks ────────────────────────────────────────────────────
+    "spring boot":            ["spring", "spring mvc", "spring framework", "spring cloud",
+                               "spring security", "spring data", "spring batch",
+                               "spring boot framework", "spring rest"],
+    "django":                 ["django rest framework", "drf", "django framework"],
+    "fastapi":                ["fast api", "fastapi framework", "python fastapi"],
+    "flask":                  ["flask framework", "flask api", "python flask"],
+    "express":                ["express.js", "expressjs", "node express", "express framework"],
+    "laravel":                ["php laravel", "laravel framework"],
+    "rails":                  ["ruby on rails", "ror", "rails framework"],
+    "asp.net":                ["asp net", "dotnet", ".net core", "asp.net core", "mvc .net"],
+    "rest apis":              ["restful apis", "rest api", "restful services", "web services",
+                               "rest", "api development", "rest endpoints", "http apis",
+                               "restful web services", "api integration", "api design",
+                               "rest architecture", "http rest", "json api", "xml api"],
+    "graphql":                ["graph ql", "apollo graphql", "graphql api"],
+    "microservices":          ["microservices architecture", "micro services",
+                               "distributed systems", "service oriented architecture", "soa",
+                               "event driven architecture", "service mesh", "api gateway"],
+    "hibernate":              ["jpa", "hibernate jpa", "orm", "object relational mapping",
+                               "hibernate/jpa", "hibernate/JPA", "spring data jpa",
+                               "entity framework", "sequelize", "sqlalchemy"],
+    "grpc":                   ["grpc framework", "protocol buffers", "protobuf"],
+    "soap":                   ["soap web services", "wsdl", "xml web services"],
+
+    # ── Frontend ──────────────────────────────────────────────────────────────
+    "react":                  ["react.js", "reactjs", "react js", "react hooks",
+                               "react native", "next.js", "nextjs", "react redux",
+                               "react framework", "jsx", "react components"],
+    "angular":                ["angularjs", "angular js", "angular 2+", "angular framework",
+                               "angular cli", "ngrx"],
+    "vue":                    ["vue.js", "vuejs", "nuxt.js", "vue framework", "vuex"],
+    "html":                   ["html5", "html/css", "markup", "html templates", "html coding"],
+    "css":                    ["css3", "bootstrap", "tailwind", "tailwind css",
+                               "sass", "scss", "less", "styled components", "material ui",
+                               "ant design", "chakra ui", "css frameworks", "responsive design",
+                               "flexbox", "css grid"],
+    "javascript":             ["js", "es6", "es6+", "typescript", "ts", "jquery",
+                               "vanilla javascript", "frontend scripting", "java"],
+    "redux":                  ["react redux", "state management", "flux", "mobx", "zustand"],
+    "webpack":                ["bundler", "vite", "parcel", "rollup", "build tools frontend"],
+
+    # ── Cloud Platforms ───────────────────────────────────────────────────────
+    "aws":                    ["amazon web services", "ec2", "s3", "lambda", "rds",
+                               "cloudwatch", "sagemaker", "eks", "ecs", "iam",
+                               "route53", "cloudfront", "elastic beanstalk", "aws cloud",
+                               "dynamodb", "sns", "sqs", "api gateway aws",
+                               "aws bedrock", "step functions", "aws glue"],
+    "azure":                  ["microsoft azure", "azure devops", "azure openai",
+                               "azure functions", "azure blob", "azure aks",
+                               "azure cosmos db", "azure service bus", "azure ad",
+                               "azure storage", "azure pipelines"],
+    "gcp":                    ["google cloud", "google cloud platform", "bigquery",
+                               "google cloud storage", "gke", "cloud run",
+                               "cloud functions", "vertex ai", "google cloud ai"],
+    "cloud exposure":         ["aws", "azure", "gcp", "google cloud", "cloud platforms",
+                               "cloud", "cloud computing", "cloud services",
+                               "cloud deployment", "cloud infrastructure", "cloud native",
+                               "multi cloud", "hybrid cloud"],
+
+    # ── DevOps / CI-CD ────────────────────────────────────────────────────────
+    "docker":                 ["containerization", "containers", "dockerized",
+                               "docker compose", "dockerfile", "container management",
+                               "docker swarm"],
+    "kubernetes":             ["k8s", "container orchestration", "eks", "aks", "gke",
+                               "helm", "kubectl", "openshift", "k8s cluster"],
+    "jenkins":                ["ci/cd", "ci/cd pipelines", "continuous integration",
+                               "continuous deployment", "pipeline", "jenkins pipeline"],
+    "github actions":         ["ci/cd", "ci/cd pipelines", "github ci", "github workflows"],
+    "gitlab ci":              ["gitlab pipelines", "ci/cd", "gitlab devops"],
+    "ci/cd pipelines":        ["jenkins", "github actions", "azure devops", "gitlab ci",
+                               "circleci", "travis ci", "continuous integration",
+                               "continuous deployment", "devops pipeline", "build pipeline",
+                               "deployment pipeline", "automated deployment"],
+    "git":                    ["git/github", "github", "gitlab", "bitbucket",
+                               "version control", "source control", "svn",
+                               "git commands", "branching strategy", "git flow"],
+    "terraform":              ["infrastructure as code", "iac", "pulumi", "cloudformation",
+                               "infrastructure automation"],
+    "ansible":                ["configuration management", "puppet", "chef",
+                               "infrastructure automation"],
+    "prometheus":             ["monitoring", "grafana", "alertmanager", "observability"],
+    "grafana":                ["monitoring", "prometheus", "dashboards", "observability"],
+
+    # ── Build Tools ───────────────────────────────────────────────────────────
+    "maven":                  ["gradle", "build tools", "ant", "npm", "yarn", "pip",
+                               "maven build", "pom.xml"],
+    "gradle":                 ["maven", "build automation", "build tools"],
+    "npm":                    ["node package manager", "yarn", "package manager", "pnpm"],
+
+    # ── Agile / Project Management ────────────────────────────────────────────
+    "agile":                  ["agile methodology", "agile/scrum", "scrum", "sprint",
+                               "kanban", "agile development", "iterative development",
+                               "agile practices", "agile ceremonies", "agile teams"],
+    "scrum":                  ["agile/scrum", "agile", "sprint planning", "daily standup",
+                               "sprint review", "retrospective", "scrum master",
+                               "scrum ceremonies", "product backlog"],
+    "jira":                   ["jira tool", "project management tool", "issue tracking",
+                               "atlassian jira", "jira board", "jira tickets"],
+    "confluence":             ["atlassian confluence", "documentation tool", "wiki"],
+
+    # ── AI / ML ───────────────────────────────────────────────────────────────
+    "machine learning":       ["ml", "scikit-learn", "sklearn", "supervised learning",
+                               "unsupervised learning", "predictive modeling",
+                               "classification", "regression", "ml models",
+                               "model training", "feature engineering", "ml algorithms"],
+    "deep learning":          ["neural networks", "cnn", "rnn", "lstm", "transformer",
+                               "tensorflow", "pytorch", "keras", "dl",
+                               "computer vision", "image classification"],
+    "nlp":                    ["natural language processing", "text processing",
+                               "text analytics", "sentiment analysis",
+                               "named entity recognition", "text classification",
+                               "language models", "text mining", "information extraction"],
+    "large language models":  ["llm", "llms", "gpt", "openai", "claude", "gemini",
+                               "llama", "mistral", "language models", "foundation models",
+                               "gpt-4", "chatgpt", "generative ai", "llm development", "llm integration"],
+    "rag pipelines":          ["retrieval augmented generation", "rag",
+                               "retrieval-augmented generation", "semantic search",
+                               "vector search", "knowledge retrieval", "document retrieval",
+                               "rag system", "rag architecture"],
+    "prompt engineering":     ["prompting", "prompt design", "prompt tuning",
+                               "chain of thought", "few shot learning", "zero shot",
+                               "prompt optimization", "llm prompting"],
+    "embedding models":       ["embeddings", "text embeddings", "vector embeddings",
+                               "sentence transformers", "word2vec", "openai embeddings",
+                               "embedding generation", "dense embeddings"],
+    "vector databases":       ["faiss", "pinecone", "chromadb", "weaviate", "qdrant",
+                               "milvus", "vector store", "vector db", "vector index"],
+    "agentic ai workflows":   ["ai agents", "autonomous agents", "agent workflows",
+                               "tool use", "function calling", "tool calling",
+                               "agent based systems", "llm agents"],
+    "multi-agent systems":    ["multi agent", "crewai", "autogen", "langgraph",
+                               "agent orchestration", "agent collaboration"],
+    "mlops":                  ["ml operations", "model deployment", "model monitoring",
+                               "mlflow", "kubeflow", "model serving", "model registry",
+                               "feature store", "model pipeline"],
+    "langchain":              ["lang chain", "langchain framework", "llm framework",
+                               "langchain python"],
+    "computer vision":        ["cv", "image processing", "opencv", "object detection",
+                               "image recognition", "cnn", "yolo"],
+
+    # ── Testing ───────────────────────────────────────────────────────────────
+    "manual testing":         ["functional testing", "test execution", "black box testing",
+                               "exploratory testing", "smoke testing", "sanity testing",
+                               "regression testing", "uat", "user acceptance testing",
+                               "system testing", "integration testing", "end to end testing"],
+    "api testing":            ["rest api testing", "postman", "swagger", "swaggerui",
+                               "api validation", "endpoint testing", "soap testing",
+                               "api automation", "rest assured"],
+    "automation testing":     ["selenium", "cypress", "playwright", "testng", "junit",
+                               "pytest", "robot framework", "test automation",
+                               "selenium webdriver", "automated testing", "ui automation"],
+    "test case design":       ["test cases", "test case preparation", "test case development",
+                               "test case writing", "test case execution", "test scenarios",
+                               "test planning", "test strategy", "test design",
+                               "test scenario creation", "test documentation"],
+    "bug tracking":           ["defect tracking", "jira", "bugzilla", "hp alm",
+                               "defect management", "defect lifecycle", "issue tracking",
+                               "defect reporting", "bug reporting", "defect triage",
+                               "bug management"],
+    "database validation":    ["data validation", "backend data validation",
+                               "sql validation", "data integrity", "db testing",
+                               "data verification", "database testing"],
+    "performance testing":    ["load testing", "stress testing", "jmeter",
+                               "gatling", "locust", "k6", "performance benchmarking"],
+    "security testing":       ["penetration testing", "pen testing", "vapt",
+                               "vulnerability assessment", "owasp", "security scanning"],
+
+    # ── Data Engineering ──────────────────────────────────────────────────────
+    "airflow":                ["apache airflow", "workflow orchestration", "dag",
+                               "data pipelines", "airflow dags"],
+    "kafka":                  ["apache kafka", "event streaming", "message queue",
+                               "rabbitmq", "activemq", "pubsub", "event driven",
+                               "message broker", "streaming platform"],
+    "spark":                  ["apache spark", "pyspark", "big data processing",
+                               "spark streaming", "databricks"],
+    "pandas":                 ["dataframes", "data manipulation", "numpy", "data analysis",
+                               "data processing python"],
+    "data pipelines":         ["etl", "elt", "data ingestion", "data processing",
+                               "data integration", "data transformation", "data flow"],
+    "tableau":                ["data visualization", "power bi", "looker", "metabase",
+                               "business intelligence", "bi tools", "reporting tools"],
+    "power bi":               ["powerbi", "microsoft power bi", "bi reporting",
+                               "data visualization", "tableau"],
+
+    # ── Communication / Soft Skills ───────────────────────────────────────────
+    "communication skills":   ["collaboration", "cross-functional", "stakeholder management",
+                               "client communication", "team communication",
+                               "interpersonal skills", "presentation skills",
+                               "verbal communication", "written communication",
+                               "cross functional teams", "team collaboration"],
+
+    # ── Security ─────────────────────────────────────────────────────────────
+    "jwt":                    ["json web token", "token based authentication", "oauth",
+                               "oauth2", "authentication", "authorization",
+                               "bearer token", "access token"],
+    "spring security":        ["security", "rbac", "role based access control",
+                               "authentication", "authorization", "spring auth"],
+    "oauth":                  ["oauth2", "openid connect", "sso", "single sign on",
+                               "identity provider", "keycloak"],
+
+    # ── Networking / Infrastructure ───────────────────────────────────────────
+    "linux":                  ["unix", "ubuntu", "centos", "rhel", "linux administration",
+                               "linux commands", "bash", "shell"],
+    "nginx":                  ["web server", "reverse proxy", "load balancer", "apache"],
+    "rest":                   ["http", "https", "api", "web api", "rest architecture"],
+
+    # ── Domain Specific ───────────────────────────────────────────────────────
+    "banking domain":         ["fintech", "financial services", "banking", "finance domain",
+                               "payment systems", "core banking", "investment banking",
+                               "retail banking", "banking software", "financial technology",
+                               "capital markets", "wealth management", "insurance",
+                               "loan origination", "credit processing", "trade finance",
+                               "risk management", "compliance", "regulatory reporting",
+                               "swift", "sepa", "banking regulations", "basel"],
+    "healthcare domain":      ["health tech", "medical software", "emr", "ehr",
+                               "healthcare it", "hospital management", "clinical systems",
+                               "patient management", "medical records", "hipaa",
+                               "health informatics", "telemedicine", "medical devices",
+                               "pharmacy systems", "laboratory systems", "radiology",
+                               "healthcare analytics", "population health"],
+    "ecommerce":              ["e-commerce", "online retail", "shopping platform",
+                               "marketplace", "payment gateway", "order management",
+                               "inventory management", "product catalog", "cart management",
+                               "checkout", "payment processing", "shopify", "magento",
+                               "woocommerce", "retail technology", "d2c", "b2c"],
+    "erp":                    ["sap", "oracle erp", "enterprise resource planning",
+                               "sap abap", "sap s4 hana", "sap hana", "oracle fusion",
+                               "microsoft dynamics", "ms dynamics", "netsuite",
+                               "odoo", "epicor", "infor", "sage erp"],
+    "crm":                    ["salesforce", "hubspot", "customer relationship management",
+                               "ms dynamics", "zoho crm", "pipedrive", "freshsales",
+                               "salesforce crm", "crm software", "customer management",
+                               "lead management", "sales automation"],
+    "education technology":   ["edtech", "lms", "learning management system", "e-learning",
+                               "online learning", "student management", "school management",
+                               "course management", "moodle", "canvas", "blackboard"],
+    "telecom domain":         ["telecommunications", "telecom", "billing system",
+                               "network management", "bss", "oss", "subscriber management",
+                               "voice over ip", "voip", "5g", "network infrastructure",
+                               "siebel crm", "amdocs", "telecom billing"],
+    "logistics domain":       ["supply chain", "logistics", "warehouse management",
+                               "fleet management", "transportation management",
+                               "inventory tracking", "last mile delivery", "dispatch",
+                               "freight management", "erp logistics"],
+    "retail domain":          ["retail", "pos", "point of sale", "retail software",
+                               "store management", "merchandising", "retail analytics",
+                               "omnichannel", "inventory management"],
+    "manufacturing domain":   ["manufacturing", "production planning", "quality control",
+                               "shop floor", "scada", "plc", "iot manufacturing",
+                               "lean manufacturing", "six sigma", "mes"],
+    "legal domain":           ["legal tech", "legal software", "case management",
+                               "contract management", "document management",
+                               "compliance", "legal analytics", "law firm software"],
+    "hr domain":              ["human resources", "hrms", "hris", "hr software",
+                               "payroll", "recruitment", "talent management",
+                               "performance management", "onboarding", "employee management",
+                               "workday", "successfactors", "bamboohr"],
+    "sales domain":           ["sales", "b2b sales", "b2c sales", "sales management",
+                               "lead generation", "pipeline management", "quota",
+                               "account management", "deal closing", "revenue"],
+    "marketing domain":       ["digital marketing", "seo", "sem", "content marketing",
+                               "social media marketing", "email marketing",
+                               "marketing automation", "google analytics", "hubspot",
+                               "campaign management", "brand management"],
+    "iot":                    ["internet of things", "iot devices", "embedded systems",
+                               "sensor data", "mqtt", "edge computing", "iot platform",
+                               "connected devices", "smart devices"],
+    "cybersecurity":          ["information security", "network security", "ethical hacking",
+                               "penetration testing", "vulnerability assessment",
+                               "security operations", "soc", "siem", "firewall",
+                               "intrusion detection", "owasp", "iso 27001"],
+    "data science":           ["data analysis", "data analytics", "statistical analysis",
+                               "data visualization", "business intelligence",
+                               "predictive analytics", "statistical modeling",
+                               "data exploration", "eda", "hypothesis testing"],
+    "devops":                 ["development operations", "site reliability engineering",
+                               "sre", "platform engineering", "infrastructure automation",
+                               "cloud operations", "devsecops", "gitops"],
+    "embedded systems":       ["firmware", "rtos", "real time systems", "microcontroller",
+                               "arduino", "raspberry pi", "embedded c", "fpga"],
+    "gaming":                 ["game development", "unity", "unreal engine", "game design",
+                               "game programming", "3d development", "vr development",
+                               "ar development"],
+    "blockchain":             ["web3", "smart contracts", "solidity", "ethereum",
+                               "distributed ledger", "defi", "nft", "cryptocurrency"],
+}
+
+def normalize_skill(skill: str) -> str:
+    """Return canonical form of a skill."""
+    s = skill.strip().lower()
+    for canonical, aliases in SKILL_ALIASES.items():
+        if s in aliases:
+            return canonical
+    return s
+
 
 # ── FIX #1: Stricter fuzzy_match — word-boundary only, no raw substring ───────
 def fuzzy_match(jd_skill: str, cand_set: set, skill_synonyms: dict = None) -> bool:
@@ -3641,9 +3977,9 @@ def fuzzy_match(jd_skill: str, cand_set: set, skill_synonyms: dict = None) -> bo
                     return True
 
     # Hyphen normalization: "scikit-learn" == "scikit learn"
-    jd_nohyphen = jd_skill.replace("-", " ")
+    jd_nohyphen = jd_skill.replace("-", " ").replace("/", " ")
     for cs in cand_set:
-        cs_nohyphen = cs.replace("-", " ")
+        cs_nohyphen = cs.replace("-", " ").replace("/", " ")
         if jd_nohyphen == cs_nohyphen:
             return True
     # Version suffix normalization: "css" matches "css3", "html" matches "html5"
@@ -3652,6 +3988,22 @@ def fuzzy_match(jd_skill: str, cand_set: set, skill_synonyms: dict = None) -> bo
         jd_base = jd_skill.rstrip("0123456789")
         if cs_base == jd_base:
             return True
+    # Normalization match via SKILL_ALIASES
+    jd_normalized = normalize_skill(jd_skill)
+    for cs in cand_set:
+        if normalize_skill(cs) == jd_normalized:
+            return True
+    # Check SKILL_ALIASES directly
+    if jd_skill in SKILL_ALIASES:
+        for alias in SKILL_ALIASES[jd_skill]:
+            if alias in cand_set:
+                return True
+    # Check if candidate skill is alias of jd_skill
+    for canonical, aliases in SKILL_ALIASES.items():
+        if jd_skill in aliases or jd_skill == canonical:
+            if canonical in cand_set or any(a in cand_set for a in aliases):
+                return True
+
     return False
 
 
@@ -3710,6 +4062,10 @@ def build_explanation_data(candidate: dict, jd_features: dict, final_score: floa
     cand_set = set(s.lower() for s in candidate.get("skills", []))
     jd_skills = set(jd_features.get("all_skills", []))
     req       = set(jd_features.get("required_skills", []))
+    raw_tokens = set(tokenize(candidate.get("raw_text", "")))
+    for jd_skill in jd_skills:
+        if all(w in raw_tokens for w in jd_skill.split()):
+            cand_set.add(jd_skill)
 
     syns     = jd_features.get("skill_synonyms", {})
     matched  = sorted(s for s in jd_skills if fuzzy_match(s, cand_set, syns))
@@ -3775,6 +4131,10 @@ def rerank_and_explain(
         cand_skills_lower = set(s.lower() for s in c.get("skills", []))
         jd_all = set(jd_features.get("all_skills", []))
         syns = jd_features.get("skill_synonyms", {})
+        raw_tokens = set(tokenize(c.get("raw_text", "")))
+        for jd_skill in jd_all:
+            if all(w in raw_tokens for w in jd_skill.split()):
+                cand_skills_lower.add(jd_skill)
         matched_now = [s for s in jd_all if fuzzy_match(s, cand_skills_lower, syns)]
         matched = ", ".join(matched_now[:15]) or "none"
         chunks  = c.get("chunks", {})
@@ -3795,7 +4155,8 @@ def rerank_and_explain(
             model="gpt-4o-mini",
             temperature=0,
             api_key=api_key,
-            max_tokens=min(4000, 600 + 400 * len(domain_filtered)),
+            max_tokens=min(6000, 800 + 500 * len(domain_filtered)),
+            # model_kwargs={"seed": 42},
         )
         prompt = ChatPromptTemplate.from_messages([
             ("system",
@@ -3814,14 +4175,16 @@ def rerank_and_explain(
              "   even if they share some general skills like 'python' or 'excel'.\n"
              "3. Generic skills (excel, python, communication) shared across domains\n"
              "   do NOT make someone relevant to this role. Core domain skills do.\n"
-             "4. ALREADY_MATCHED skills are 100% confirmed present in resume — STRICTLY NEVER mention them in gaps. This is a hard rule.\n"
+             "4. ALREADY_MATCHED skills are 100% confirmed present in resume — STRICTLY NEVER mention them in gaps or strengths contradictions. This is a HARD rule with no exceptions.\n"
              "5. Infer soft skills from experience context, don't hallucinate them.\n"
+             "6. Candidate experience years are EXACT — never contradict them in strengths or gaps.\n"
              "6. Penalize keyword stuffing or inconsistent domain profiles.\n"
-             "7. Only mention strengths explicitly supported by candidate context.\n\n"
+             "7. Only mention strengths explicitly supported by candidate context.\n"
+             "8. Gaps ONLY from these JD required skills: {required_skills}. Never invent gaps not in JD.\n\n"
              "For EACH candidate return:\n"
              "  score     — float 0.0–1.0 (true fit for this specific role)\n"
              "  strengths — list of 2–3 strings, each under 12 words, specific\n"
-             "  gaps      — list of 1–2 strings, each under 12 words, specific\n"
+             "  gaps      — list of 1–2 strings, each under 12 words, specific, ONLY from JD required skills that are genuinely missing\n"
              "  relevant  — true/false (is this candidate in the right domain?)\n\n"
              "Return ONLY this JSON:\n"
              "{{\"results\": [\n"
@@ -3862,13 +4225,13 @@ def rerank_and_explain(
                 blend = 0.75 * llm_s + 0.25 * orig
             else:
                 # LLM is confident — standard blend
-                blend = 0.65 * llm_s + 0.35 * orig
+                blend = 0.50 * llm_s + 0.50 * orig
 
             item["ce_score"]    = llm_s
             item["final_score"] = round(min(blend, 1.0), 4)
             item["explanation"]["score_pct"]  = round(min(blend, 1.0) * 100, 1)
             item["explanation"]["strengths"]  = res.get("strengths", [])[:4]
-            item["explanation"]["gaps"]       = res.get("gaps",      [])[:3]
+            item["explanation"]["gaps"] = res.get("gaps", [])[:3]
             item["is_relevant"] = is_relevant and llm_s >= LLM_RELEVANCE_GATE
 
             # ── Recompute matched/missing so they are consistent ──────────────
@@ -3877,6 +4240,10 @@ def rerank_and_explain(
             jd_skills = set(jd_features.get("all_skills", []))
             req       = set(jd_features.get("required_skills", []))
             syns      = jd_features.get("skill_synonyms", {})
+            raw_tokens = set(tokenize(c.get("raw_text", "")))
+            for jd_skill in jd_skills:
+                if all(w in raw_tokens for w in jd_skill.split()):
+                    cand_set.add(jd_skill)
 
             matched  = sorted(s for s in jd_skills if fuzzy_match(s, cand_set, syns))
             missing  = sorted(s for s in jd_skills if not fuzzy_match(s, cand_set, syns))
@@ -3889,6 +4256,16 @@ def rerank_and_explain(
             item["explanation"]["missing_skills"]   = missing[:8]
             item["explanation"]["required_matched"] = sorted(s for s in req if fuzzy_match(s, cand_set, syns))
             item["explanation"]["required_missing"] = sorted(s for s in req if not fuzzy_match(s, cand_set, syns))
+
+            # Remove any matched skills from LLM gaps
+            llm_gaps = item["explanation"]["gaps"]
+            matched_words = set(" ".join(matched).lower().split())
+            filtered_gaps = []
+            for gap in llm_gaps:
+                gap_words = set(gap.lower().split())
+                if not gap_words.intersection(matched_words):
+                    filtered_gaps.append(gap)
+            item["explanation"]["gaps"] = filtered_gaps
 
     except Exception as exc:
         print(f"[retrieval_engine] Rerank+explain failed: {exc} — using pre-ranked scores")
@@ -3927,13 +4304,19 @@ def retrieve_top_n(
     if not index.is_ready():
         return []
 
+
     # ── Call #1 ───────────────────────────────────────────────────────────────
-    jd_features = extract_jd_features(jd_text, api_key)
-    print("ALL SKILLS:", jd_features["all_skills"])  # ← ADD
+    jd_hash = hashlib.md5(jd_text.encode()).hexdigest()
+    if not hasattr(retrieve_top_n, "_jd_cache"):
+        retrieve_top_n._jd_cache = {}
+    if jd_hash in retrieve_top_n._jd_cache:
+        jd_features = retrieve_top_n._jd_cache[jd_hash]
+    else:
+        jd_features = extract_jd_features(jd_text, api_key)
+        retrieve_top_n._jd_cache[jd_hash] = jd_features
+    print("ALL SKILLS:", jd_features["all_skills"])
     for c in index.candidates:
-        if "shubham" in c.get("name", "").lower():
-            print("NAME:", c.get("name"), "| scikit:", [s for s in c.get("skills", []) if "scikit" in s])
-            print("Total skills:", len(c.get("skills", [])))
+        print("NAME:", c.get("name"), "| exp:", c.get("experience_years"))
     jd_tokens = tokenize(jd_text)
 
     # ── Retrieval (no new LLM call) ───────────────────────────────────────────
@@ -3959,13 +4342,20 @@ def retrieve_top_n(
 
         # FIX #5: Penalize pre-score using domain relevance signal
         domain_rel = domain_relevance_score(candidate, jd_features)
-        domain_penalty = 1.0 if domain_rel >= 0.2 else (0.5 + domain_rel * 2.5)
+        domain_penalty = 1.0 if domain_rel >= 0.1 else (0.7 + domain_rel * 3.0)
+
+        # final_score = min(
+        #     (0.45 * skill_sc + 0.25 * sem_adj + 0.25 * exp_sc + 0.05 * min(skill_sc * 1.1, 1.0))
+        #     * domain_penalty,
+        #     1.0,
+        # )
 
         final_score = min(
-            (0.45 * skill_sc + 0.25 * sem_adj + 0.25 * exp_sc + 0.05 * min(skill_sc * 1.1, 1.0))
+            (0.50 * skill_sc + 0.20 * sem_adj + 0.25 * exp_sc + 0.05 * min(skill_sc * 1.1, 1.0))
             * domain_penalty,
             1.0,
         )
+
         explanation = build_explanation_data(candidate, jd_features, final_score)
         results.append({
             "candidate":        candidate,
