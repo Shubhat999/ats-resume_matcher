@@ -2009,7 +2009,15 @@ jd_text = st.text_area(
     label_visibility="collapsed",
 )
 
-can_run = total_resumes > 0 and bool(jd_text.strip()) and api_ok
+jd_lower = jd_text.lower()
+jd_has_requirement = any(w in jd_lower for w in [
+    "experience", "skills", "responsibilities", "requirements",
+    "qualification", "must have", "preferred", "looking for",
+    "hiring", "job description", "role", "position", "duties",
+    "candidate", "we are looking", "we are hiring"
+])
+jd_valid = jd_has_requirement and len(jd_text.split()) > 30
+can_run = total_resumes > 0 and bool(jd_text.strip()) and api_ok and jd_valid
 col_btn, col_info = st.columns([1, 3])
 
 with col_btn:

@@ -1467,6 +1467,48 @@ def split_sections(text: str) -> dict:
 
 
 # ── Main pipeline (0 API calls) ───────────────────────────────────────────────
+def _is_valid_resume(raw_lower: str) -> bool:
+    words = raw_lower.split()
+    if len(words) < 80:
+        return False
+
+    resume_score = 0
+
+    section_keywords = [
+        "skills", "experience", "education", "employment", "projects",
+        "certifications", "objective", "summary", "achievements", "work history",
+        "qualification", "career", "profile", "expertise"
+    ]
+    resume_score += min(sum(1 for kw in section_keywords if kw in raw_lower) * 2, 10)
+
+    degree_keywords = [
+        "b.e.", "b.tech", "m.tech", "mca", "bca", "mba", "bba", "phd",
+        "bachelor", "master", "degree", "diploma", "cgpa", "gpa",
+        "university", "college", "graduation", "engineering"
+    ]
+    resume_score += min(sum(1 for kw in degree_keywords if kw in raw_lower) * 2, 8)
+
+    exp_keywords = [
+        "years of experience", "yrs of experience", "worked at",
+        "currently working", "designation", "internship", "fresher",
+        "full time", "part time", "present", "till date"
+    ]
+    resume_score += min(sum(1 for kw in exp_keywords if kw in raw_lower) * 3, 9)
+
+    contact_keywords = [
+        "linkedin", "github", "portfolio", "@gmail", "@yahoo",
+        "@outlook", "@hotmail", "mobile", "contact"
+    ]
+    resume_score += min(sum(1 for kw in contact_keywords if kw in raw_lower) * 2, 6)
+
+    title_keywords = [
+        "engineer", "developer", "analyst", "designer", "manager",
+        "consultant", "architect", "specialist", "executive", "officer",
+        "scientist", "lead", "intern", "trainee", "associate"
+    ]
+    resume_score += min(sum(1 for kw in title_keywords if kw in raw_lower) * 2, 7)
+
+    return resume_score >= 15
 
 def parse_resume(file_bytes: bytes, filename: str) -> dict:
     """
@@ -1478,6 +1520,11 @@ def parse_resume(file_bytes: bytes, filename: str) -> dict:
     """
     raw_text = extract_text(file_bytes, filename)
     if not raw_text.strip():
+        return {}
+
+    raw_lower = raw_text.lower()
+
+    if not _is_valid_resume(raw_lower):
         return {}
 
     sections  = split_sections(raw_text)
