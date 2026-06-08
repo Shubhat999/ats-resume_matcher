@@ -1068,6 +1068,9 @@ SECTION_HEADERS = {
         "education", "academic background", "qualifications",
         "degrees", "academic qualifications",
         "educational qualification", "educational qualifications",
+        "academic qualification", "academic qualifications",
+        "educational details", "academic details",
+        "scholastic details", "scholastic background",
     },
     "skills":         {
         "skills", "technical skills", "core competencies", "technologies",
@@ -1268,12 +1271,25 @@ def extract_experience_years(text: str, sections: dict = None) -> float:
             e_yr = current_year if end_raw in ("present","current","now") else int(end_raw)
             edu_ranges.add((s_yr, e_yr))
 
+        # Month YYYY format in education
+        for m in re.finditer(
+            r'(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*[\s,]*((?:19|20)\d{2})'
+            r'\s*(?:-+|–|—|to)\s*'
+            r'(?:(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*[\s,]*)?((?:19|20)\d{2}|present|current|now)',
+            edu_text, re.IGNORECASE
+        ):
+            s_yr = int(m.group(1))
+            end_raw = m.group(2).strip().lower()
+            e_yr = current_year if end_raw in ("present","current","now") else int(end_raw)
+            edu_ranges.add((s_yr, e_yr))
+
     work_text = text
     # for k in ["education", "skills", "certifications", "languages", "interests", "achievements"]:
     #     chunk = sections.get(k, "")
     #     if chunk.strip():
     #         work_text = work_text.replace(chunk, " ")
-
+    print(f"EDU_TEXT: '{edu_text[:150]}'")
+    print(f"EDU_RANGES: {edu_ranges}")
     ranges = []
 
     year_pattern = re.compile(

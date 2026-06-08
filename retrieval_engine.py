@@ -3817,7 +3817,7 @@ SKILL_ALIASES = {
                                "data visualization", "tableau"],
 
     # ── Communication / Soft Skills ───────────────────────────────────────────
-    "communication skills":   ["collaboration", "cross-functional", "stakeholder management",
+    "communication skills":   ["collaboration", "cross-functional", "stakeholder management", "marketing communication"
                                "client communication", "team communication",
                                "interpersonal skills", "presentation skills",
                                "verbal communication", "written communication",
@@ -3864,7 +3864,10 @@ SKILL_ALIASES = {
     "crm":                    ["salesforce", "hubspot", "customer relationship management",
                                "ms dynamics", "zoho crm", "pipedrive", "freshsales",
                                "salesforce crm", "crm software", "customer management",
-                               "lead management", "sales automation"],
+                               "lead management", "sales automation", "crm platforms", "experience with crm platforms"],
+    "crm proficiency":        ["hubspot", "hubspot crm", "salesforce", "zoho crm",
+                               "crm tools", "crm software", "crm management",
+                               "apollo.io", "pipedrive", "freshsales"],
     "education technology":   ["edtech", "lms", "learning management system", "e-learning",
                                "online learning", "student management", "school management",
                                "course management", "moodle", "canvas", "blackboard"],
@@ -3892,6 +3895,20 @@ SKILL_ALIASES = {
     "sales domain":           ["sales", "b2b sales", "b2c sales", "sales management",
                                "lead generation", "pipeline management", "quota",
                                "account management", "deal closing", "revenue"],
+    "proposal preparation": [
+    "proposal handling",
+    "proposal creation",
+    "proposal drafting",
+    "business proposal",
+    "proposal development",
+    "proposal writing",
+    "rfp response",
+    "rfq response",
+    "pitch deck creation",
+    "proposal & pitch deck creation",
+    "quotation preparation",
+    "sales proposal"
+],
     "marketing domain":       ["digital marketing", "seo", "sem", "content marketing",
                                "social media marketing", "email marketing",
                                "marketing automation", "google analytics", "hubspot",
@@ -3917,6 +3934,13 @@ SKILL_ALIASES = {
                                "ar development"],
     "blockchain":             ["web3", "smart contracts", "solidity", "ethereum",
                                "distributed ledger", "defi", "nft", "cryptocurrency"],
+    "negotiation":            ["deal negotiation","contract negotiation","commercial negotiation"],
+
+    "closing":                    ["closure","deal closure","deal closing","sales closure"],
+    "market research":            ["market trends","market analysis","industry analysis",
+                               "competitive analysis","researching market"],
+      
+   
 }
 
 def normalize_skill(skill: str) -> str:
@@ -4089,7 +4113,7 @@ def build_explanation_data(candidate: dict, jd_features: dict, final_score: floa
 # ═══════════════════════════════════════════════════════════════════════════════
 
 # FIX #3: Relevance gate threshold — LLM score below this = irrelevant candidate
-LLM_RELEVANCE_GATE = 0.25
+LLM_RELEVANCE_GATE = 0.15
 
 def rerank_and_explain(
     jd_text: str,
@@ -4155,7 +4179,7 @@ def rerank_and_explain(
             model="gpt-4o-mini",
             temperature=0,
             api_key=api_key,
-            max_tokens=min(6000, 800 + 500 * len(domain_filtered)),
+            max_tokens=min(8000, 1000 + 600 * len(domain_filtered)),
             # model_kwargs={"seed": 42},
         )
         prompt = ChatPromptTemplate.from_messages([
@@ -4208,7 +4232,15 @@ def rerank_and_explain(
 
         for i, item in enumerate(domain_filtered):
             if i >= len(llm_results):
-                break
+                item["ce_score"] = 0.0
+                item["is_relevant"] = True
+                ex = item["explanation"]
+                c  = item["candidate"]
+                if not ex["strengths"] and ex["required_matched"]:
+                    ex["strengths"].append(f"Meets: {', '.join(ex['required_matched'][:3])}")
+                if not ex["gaps"] and ex["required_missing"]:
+                    ex["gaps"].append(f"Missing: {', '.join(ex['required_missing'][:2])}")
+                continue
             res   = llm_results[i]
             llm_s = max(0.0, min(1.0, float(res.get("score", 0.5))))
             is_relevant = res.get("relevant", True)
@@ -4217,12 +4249,12 @@ def rerank_and_explain(
             # ── FIX #3: Hard relevance gate ───────────────────────────────────
             # If LLM says score is very low OR explicitly marks as irrelevant,
             # zero out the score so it sinks to the bottom / gets filtered.
-            if llm_s < LLM_RELEVANCE_GATE or not is_relevant:
-                blend = llm_s * 0.1  # near-zero — will be filtered out
+            if llm_s < LLM_RELEVANCE_GATE:
+                blend = max(llm_s * 0.1, orig * 0.2)  # pre-score ka 20% bachao
             # ── FIX #4: LLM-dominant blend for low-mid scores ─────────────────
             elif llm_s < 0.5:
-                # LLM is skeptical — trust it more than pre-score
-                blend = 0.75 * llm_s + 0.25 * orig
+                # LLM is skeptical — balance with pre-score
+                blend = 0.50 * llm_s + 0.50 * orig
             else:
                 # LLM is confident — standard blend
                 blend = 0.50 * llm_s + 0.50 * orig
@@ -4289,7 +4321,7 @@ def rerank_and_explain(
     # Remove clearly irrelevant candidates from results
     filtered = [r for r in domain_filtered if r.get("is_relevant", True) or r["final_score"] > 0.15]
 
-    return filtered[:top_n]
+    return domain_filtered[:top_n]
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -4351,7 +4383,7 @@ def retrieve_top_n(
         # )
 
         final_score = min(
-            (0.50 * skill_sc + 0.20 * sem_adj + 0.25 * exp_sc + 0.05 * min(skill_sc * 1.1, 1.0))
+            (0.40 * skill_sc + 0.20 * sem_adj + 0.35 * exp_sc + 0.05 * min(skill_sc * 1.1, 1.0))
             * domain_penalty,
             1.0,
         )
@@ -4369,7 +4401,7 @@ def retrieve_top_n(
         })
 
     results.sort(key=lambda x: -x["final_score"])
-    rerank_pool = results[: min(top_n * 2, 8)]
+    rerank_pool = results[: min(top_n * 2, 15)]
 
     # ── Call #3 ───────────────────────────────────────────────────────────────
     return rerank_and_explain(jd_text, jd_features, rerank_pool, top_n, api_key)
